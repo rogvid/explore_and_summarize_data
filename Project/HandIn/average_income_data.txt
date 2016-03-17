@@ -1,0 +1,1 @@
+The average income dataset contains data from www.dst.dk of average income in the municipalities in and around central Copenhagen. Each row in the dataset corresponds to a municipality, and each column a year. Each value in a specific row and column corresponds to the average income in that municipality in that year.

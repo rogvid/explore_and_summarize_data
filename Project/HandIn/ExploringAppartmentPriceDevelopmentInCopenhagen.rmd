@@ -1,0 +1,638 @@
+---
+title: "Exploring the Appartment Price Development in Copenhagen"
+author: "Rógvi Dávid Arge"
+date: "February 2, 2016"
+output: html_document
+---
+
+## Useful facts when going through this analysis
+
+* kr to dollar conversion 1 kr $\approx$ 0.15 dollar
+
+* Data was obtained from the <a href="www.boliga.dk">boliga</a> and <a href="www.dst.dk">Danmark Statistik</a>
+
+* The data only contains sales information on sales within the postal codes 1000-2730 
+
+As a young man who recently got my MSC in physics, living and working in Copenhagen, the next rational step is to buy an appartment. Early estimates of mine - for when I could possibly buy an appartment, based on my pay - dampened my spirits, because appartment prices all were in the price range 2 - 4 mio. kr (270k - 540k $) for 3 room appartments of size 60 - 100 m^2. Having lived in Denmark in my youth, I remembered that my parents bought a ~100 m^2 appartment for far less. For this reason I became very interested in how the appartment prices in Copenhagen had developed in the past years. Luckily danish realtors, have data for sales in Denmark all the way back to 1992, which is available at <a href="www.boliga.dk">www.boliga.dk</a>. 
+The data contains the following information on the sale:
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8, fig.path='Figs/',
+                      echo=FALSE, warning=FALSE, message=FALSE)
+```
+
+```{r, echo=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(ggthemes)
+library(RColorBrewer)
+library(rgdal)
+library(ggmap)
+library(raster)
+library(broom)
+library(scales)
+library(maptools)
+library(Cairo)
+library(plyr)
+# apr <- read.csv("C:/Users/rogvid/Dropbox/OOC/Nanodegree/DataAnalyst/P4 - Explore and Summarize Data/Project/P4_SalesData_1000_to_2730.csv", sep=",", encoding = "UTF-8")
+apr <- read.csv("C:/Users/rogvid/Dropbox/OOC/Nanodegree/DataAnalyst/P4 - Explore and Summarize Data/Project/AppartmentSalesData.csv", sep=",", encoding = "UTF-8")
+# Initial price percentage is as decimals. To make it clearer, convert it to percentages
+apr$price_percentage_difference = apr$price_percentage_difference * 100.0
+# For usage later on I would like the year, month and day as separate variables
+# in the dataframe and also I want the date as a Date format
+date <- apr$date
+apr <- tidyr::separate(apr, date, c("day", "month", "year"))
+apr$date <- as.Date(date, format("%d-%m-%Y"))
+
+# Generate appartment prices data frame grouped by year, with various summaries
+apr_year <- ddply(apr, ~year, summarise,
+                  median_sp=median(sales_price),
+                  q1_sp=quantile(sales_price, 0.25),
+                  q3_sp=quantile(sales_price, 0.75),
+                  median_ppsm=median(price_per_square_meter),
+                  q1_ppsm=quantile(price_per_square_meter, 0.25),
+                  q3_ppsm=quantile(price_per_square_meter, 0.75))
+# Because I want the datapoints at each half year, each year group
+# is appended with the 06-15 string.
+apr_year$year <- as.Date(paste(apr_year$year, "-06-15", sep=""),
+                         format="%Y-%m-%d")
+
+```
+
+```{r}
+str(apr)
+
+```
+
+To start with, we can look at some basics, like how have the sales prices changed over the years, and how have the prices per square meter (PPSM) changed over the years?
+
+```{r, echo=FALSE}
+# The following lines plot the median, first and third quantile of the years 1992-2015. 2016 data is omitted because there was only 1 month of data.
+price_dev_plot <- ggplot(data = subset(apr, sales_price < 1e7),
+                         aes(x = date, y = sales_price))
+price_dev_plot <- price_dev_plot + geom_point(alpha=1/10)
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=median_sp),
+                                             size=2.5, color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=q1_sp),
+                                             size=1.5,
+                                             linetype=2,
+                                             color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=q3_sp),
+                                             size=1.5,
+                                             linetype=2,
+                                             color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + scale_y_continuous(breaks=seq(0, 7e6, 0.5e6))
+price_dev_plot <- price_dev_plot +
+  coord_cartesian(xlim=c(tail(apr$date, 1), head(apr$date, 1)),
+                  ylim=c(0, quantile(apr$sales_price,0.99))) 
+
+price_dev_plot <- price_dev_plot + theme_tufte(ticks=FALSE) +
+  xlab("Date") + ylab("Sales price")
+
+PPSM_dev_plot <- ggplot(data = subset(apr, sales_price < 1e7),
+                        aes(x = date, y = price_per_square_meter))
+
+PPSM_dev_plot <- PPSM_dev_plot + geom_point(alpha=1/10)
+
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=median_ppsm),
+                                           size=2.5, color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=q1_ppsm),
+                                           size=1.5,
+                                           linetype=2,
+                                           color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=q3_ppsm),
+                                           size=1.5,
+                                           linetype=2,
+                                           color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot +
+  coord_cartesian(xlim=c(tail(apr$date, 1), head(apr$date, 1)),
+                  ylim=c(0, quantile(apr$price_per_square_meter, 0.99)))
+
+PPSM_dev_plot <- PPSM_dev_plot + theme_tufte(ticks=FALSE) +
+  xlab("Date") + ylab("Price per square meter")
+
+grid.arrange(price_dev_plot, PPSM_dev_plot, ncol=2)
+```
+
+These figures show the sales prices and price per square meter as a function of time, with the median and first- and third quantile on top.
+We see that the sales prices have continuously grown, with except for a dip from 2006-2009. This dip likely occured because of the economic crises and resulted in a fall in PPSM of nearly a third. But as we can see from the figures, the prices have grown again since then, and it looks like the PPSM has now reached the same levels as it had in 2006 of around 30.000 kr/m^2. Compared to the measly average of about 6.000 kr/m^2 the appartment prices in Copenhagen have grown with an average rate of 1.000 kr/m^2 per year or a total of 500%. W.r.t. the figure on the left, the average sales price (ASP) has grown from about 500.000 kr to 2.000.000 kr, which is about 400%, and corresponds to an average increase in sales price (SP) per year of about 62.500 kr. Given that prices are increasing, does this reflect in price percentage difference (price percentage difference (PPD) is the difference between the initial price set by the realtor/owner and the actual sales price)? 
+
+```{r, echo=FALSE}
+ggplot(data=apr, aes(x=year, y=price_percentage_difference)) +
+  geom_jitter(width=3, alpha=1/10) + theme_tufte(ticks=FALSE)
+```
+
+This plot doesn't really show anything, as it seems like one sale was done with a positive PPD of around 162.999.900%. To find out if this is an error I went to the website where I got my data. According to the site, this sale was initially set to 1 kr and sold for 1.630.000 kr, resulting in the 162.999.900%. But to see the bulk of the data we can limit the axis limits and show the distribution of PPD. 
+
+```{r, echo=FALSE}
+# Plot the price percentage difference as well as the price percentage difference distribution
+ppd_dev_plot <- ggplot(data=apr, aes(x=year, y=price_percentage_difference)) +
+  geom_jitter(width=3, alpha=1/20) +
+  theme_tufte(ticks=FALSE) +
+  coord_cartesian(ylim=c(-10, 5))
+
+ppd_dist_plot <- ggplot(data=subset(apr, price_percentage_difference < 10),
+                        aes(x=price_percentage_difference))
+ppd_dist_plot <- ppd_dist_plot + geom_histogram(binwidth=1) +
+  theme_tufte(ticks=FALSE)
+ppd_dist_plot <- ppd_dist_plot +
+  geom_vline(xintercept=quantile(subset(apr, price_percentage_difference < 10)
+                               $price_percentage_difference, 0.25),
+             linetype=2,
+             color="orange")
+ppd_dist_plot <- ppd_dist_plot +
+  geom_vline(xintercept=quantile(subset(apr, price_percentage_difference < 10)
+                               $price_percentage_difference, 0.75),
+             linetype=2,
+             color="orange")
+ppd_dist_plot <- ppd_dist_plot +
+  geom_vline(xintercept=median(subset(apr, price_percentage_difference < 10)
+                               $price_percentage_difference),
+             color="orange")
+ppd_dist_plot <- ppd_dist_plot + coord_cartesian(xlim=c(-10, 10),
+                                                 ylim=c(0, 8000))
+grid.arrange(ppd_dev_plot, ppd_dist_plot, ncol=2)
+```
+
+So it looks as though the actual sales price is almost always lower with a median PPD of -3%. On the left plot it is quite hard to describe what is happening, but on the right plot it is clear that the PPD is almost normally distributed, with a peak at around -3%.
+
+From these figures we can see that the ASP increases, and that the sales price is almost always lower than the initial price. To see if the average incomes have increased as much, I downloaded the average income data for people in the same municipalities as my sales dataset from Danmark Statistik at <a href="www.dst.dk">dst.dk</a>.
+One issue with this dataset is that the smaller submunicipalities that are present in the appartment sales data, like Valby, Vanløse, Hedehusene, etc. are all grouped up in the København municipality. This will hide much of the information related to København, because this is a large city with many different areas, which have a huge price gap, and should most likely also have a huge income gap.
+
+```{r, echo=FALSE}
+aid <- read.csv("C:/Users/rogvid/Dropbox/OOC/Nanodegree/DataAnalyst/P4 - Explore and Summarize Data/Project/AverageIncome1000_2730_new.csv", sep=",")
+
+# As is explained in the average income document provided, the data is found in a 
+# format in which municipality name is the first column and years are the column headers.
+# For this reason I use tidyr's function gather to reshape my dataframe into a 
+# "municipality", "year", "avg_income" format. 
+aid <- tidyr::gather(aid, "year", "avg_income", 2:19)
+aid$year <- gsub("X", "", aid$year)
+aid$year <- as.integer(aid$year)
+# aid_yearly <- ddply(aid_groups, .(year), summarize, yearly_mean_inc=mean(avg_income))
+colnames(aid) <- c("municipality", "year", "avg_income")
+
+aid_municipality <- ddply(aid, ~municipality, summarise, median_aid=median(avg_income), q1_aid=quantile(avg_income, 0.25), q3_aid=quantile(avg_income, 0.75))
+
+```
+
+```{r, echo=FALSE}
+avg_income_dev_plot <- ggplot(data = aid, aes(x = year, y = avg_income)) +
+  geom_jitter(alpha=1/2.0, size=3, width = 3)
+
+avg_income_dev_plot <- avg_income_dev_plot +
+  theme_tufte(ticks=FALSE) + geom_smooth()
+
+avg_income_dev_plot
+```
+
+This figure shows how the average yearly income (AYI) has increased since 1994, and it is quite clear that there has been an increase of about 170% over the entire period. This corresponds to an average increase in AYI of about 5.500 kr/year. The slope of the curve might seem a little steep, but that is because the y axis starts at 150.000 and not 0. It is also interesting to see that the dip we found in the sales prices and PPSM in the sales data also shows as a break in the linear increase of the income curve. The effect of the economic crisis, didn't have as big an effect on the increase in AYI, but we have to take into account that even though the appartment market prices plummeted, for about 3 years , they had an explosive growth afterwards, which is not reflected in the income growth. Comparing the 200% increase in AYI with the 400% and 500% increase in appartment prices and PPSM respectively, we can deduce that it must be more difficult for people to enter the apparment market. To see if this is reflected in the amount of sales, we can look at the amount of sales per year.
+
+```{r, echo=FALSE}
+# Because the plyr package has its own summarise function and I wish to use dplyr summarise
+# I need to unload plyr.
+detach("package:plyr", unload=TRUE)
+apr$year_month <- paste(apr$year, apr$month, sep="-")
+apr_monthly <- apr %>% group_by(year_month) %>% summarise(count=n())
+apr_monthly$year_month <- as.Date(paste(apr_monthly$year_month, "-15", sep=""),
+                                  format="%Y-%m-%d")
+sales_per_month_plot <- ggplot(data=apr_monthly, aes(x=year_month, y=count)) +
+  geom_bar(stat='identity')
+sales_per_month_plot + theme_tufte(ticks=FALSE)
+
+# Create a dataframe which contains the median sales price per municipality per year
+# as well as the sales frequency.
+apr_municipality <- apr %>%
+  group_by(municipality, year) %>%
+  summarise(median_sales_price=median(sales_price),
+            sales_frequency=1/n())
+
+# Create a dataframe which contains the summed up median sales price, price per square meter
+# number of sales and price percentage difference
+apr_municipality_summed <- apr %>%
+  group_by(municipality) %>%
+  summarise(median_sales_price=median(sales_price),
+            median_PPSM=median(price_per_square_meter),
+            nSales=n(),
+            median_ppd = median(price_percentage_difference))
+
+# convert the apr_municipality group, year into integer and join the apr_municipality data
+# frame with the average income development dataframe. This will be used later to plot
+# data on maps
+apr_municipality$year <- as.integer(apr_municipality$year)
+joined_apr_aid <- left_join(apr_municipality, aid)
+joined_apr_aid$year_bucket <- cut(joined_apr_aid$year,
+                                  breaks=c(1990, 1995, 2000,
+                                           2006, 2010, 2015,
+                                           2020))
+
+municipality_values <- joined_apr_aid %>%
+  group_by(municipality) %>% 
+  summarise(median_municipality_income=median(avg_income,na.rm = TRUE),
+            median_municipality_sales_price=median(median_sales_price), 
+            median_municipality_sales_frequency=median(sales_frequency))
+```
+
+This figure is generated by counting the number of sales per month. It shows that the amount of sales has actually increased, except for a decrease in sales in the period from 2006-2009. To see it differently we can show the median sales price per year per municipality, and the total number of sales per municipality on a map.
+
+```{r, echo=FALSE}
+adm3 <- getData('GADM', country='DK', level=2)
+#adm3 <- subset(adm3, NAME_2 %in% unique(apr$municipality))
+adm3 <- subset(adm3, NAME_1 == "Hovedstaden" )
+adm3 <- subset(adm3, NAME_2 != "Bornholm")
+adm3 <- subset(adm3, NAME_2 %in% unique(apr$municipality))
+
+library(plyr)
+fadm3 = fortify(adm3, region="NAME_2")
+colnames(fadm3) <- c("long", "lat", "order",
+                     "hole", "piece", "municipality",
+                     "group")
+fadm4 <- left_join(fadm3, apr_municipality)
+fadm4$breaks <- cut(fadm4$median_sales_price, 10)
+
+fadm1 = fortify(adm3, region="NAME_2")
+colnames(fadm1) <- c("long", "lat", "order",
+                     "hole", "piece", "municipality",
+                     "group")
+fadm1 <- left_join(fadm1, aid_municipality)
+
+cnames <- aggregate(cbind(long, lat) ~ municipality, data=fadm1, 
+                    FUN=function(x)mean(range(x)))
+
+
+
+#mapplot_v1 <- ggplot(fadm4, aes(x = long, y = lat, group=group))
+mapplot_v1 <- ggplot(fadm4, aes(x = long, y = lat))
+mapplot_v1 <- mapplot_v1 +
+  geom_polygon(data = fadm4,
+               aes(x = long, y = lat, fill = median_sales_price, group=group),
+               color=NA,
+               alpha = 0.8)
+mapplot_v1 <- mapplot_v1 + coord_cartesian(xlim=c(12.2, 12.67),
+                                           ylim=c(55.57, 55.77)) 
+mapplot_v1 <- mapplot_v1 + theme_tufte(ticks = FALSE) + facet_wrap(~year)
+mapplot_v1 <- mapplot_v1 + coord_map() + scale_fill_continuous(low="blue",
+                                                               high="hotpink") 
+mapplot_v1 <- mapplot_v1 + geom_text(data=cnames,
+                                     aes(long, lat, label = municipality),
+                                     size=1)
+
+fadm5 <- left_join(fadm3, apr_municipality_summed)
+mapplot_v2 <- ggplot(fadm5, aes(x = long, y = lat))
+mapplot_v2 <- mapplot_v2 + geom_polygon(data = fadm5,
+                                        aes(x = long,
+                                            y = lat,
+                                            fill = log(nSales),
+                                            group=group),
+                                        color=NA,
+                                        alpha = 0.8)
+mapplot_v2 <- mapplot_v2 + coord_cartesian(xlim=c(12.2, 12.67),
+                                           ylim=c(55.57, 55.77)) 
+mapplot_v2 <- mapplot_v2 + theme_tufte(ticks = FALSE)
+mapplot_v2 <- mapplot_v2 + coord_map()
+mapplot_v2 <- mapplot_v2 + scale_fill_continuous(low="blue",
+                                                 high="hotpink") 
+mapplot_v2 <- mapplot_v2 + geom_text(data=cnames,
+                                     aes(long, lat, label = municipality),
+                                     size=4)
+
+mapplot_v2
+
+```
+So as you can see on the figure, the number of sales are increasing in all municipalities, but it looks as though most of the sales occur in København and Frederiksberg.
+
+To see how the ASP has developed over the years per municipality, we can plot this on a map as well.
+
+```{r, echo=FALSE}
+mapplot_v1
+```
+
+This clearly shows that the median sales price is growing per municipality per year, and like with the frequency of sales, København seems to be the area where the median sales price increases the most.
+
+Now, if we just compare the average income increase with the average increase in appartment prices we have an average increase in yearly income of about 5.500 kr/year, while we have an average increase in appartment prices of about 62.500 kr/year. This means that the average appartment prices (AAP) grow at a rate of about 1100% of the average increase in yearly income. One might wonder how anyone, who finished their education in the past couple of years, can ever hope to buy an appartment? 
+
+One explanation of why the appartment prices continue to grow is that banks continue to grow more willing to increase the size of loans at a very low interest, in what is called Realkreditlån - see more at <a href="https://www.bolius.dk/realkreditlaan-17283">bolius.dk</a>. Those interested in the history of Realkreditlån can read more about it at <a href="http://www.realkreditraadet.dk/Statistikker/Boligmarkedsstatistik/Data.aspx">realkreditraadet.dk</a>. This low interest loan was introduced in the 18'th century as a result of a fire in 1795. The initial maximum loans given by the Realkredit institutions was 60% but in 1989, this increased to 80%. The loan can only be used on property, and as a side note, in May the interest on Realkredit loans was down to a minimum of 2.3%.  This means that to buy an appartment in Copenhagen, you actually don't need more than 20% of the property price. But you still need 20% of the property price, which in late 2015, was 20% of 2.000.000 kr or about 400.000 kr to even get a Realkreditlån. 
+Given that AAP's grow faster than AYI's, we can assume that the average price of property will continue to grow faster than the average income. So as time goes by, how are people supposed to afford homes? Many people do chose to save up an initial 5-10% of the property price, and then take a regular bank loan for the remaining 10-15%. This is a viable option, because regular bank loans interest rates have been steadily declining the 1980's as is shown on the figure below - see the more about diskonto, and interest rates on <a href="http://denstoredanske.dk/Samfund,_jura_og_politik/%C3%98konomi/Penge-_og_kreditpolitik/diskonto">interest rates</a>.
+
+<center>
+  <img src="http://denstoredanske.dk/@api/deki/files/6841/=39180089.601.png"/>
+</center>
+
+Getting back to the figures, the AYI figure also showed that there is quite a gap between the points, and it looks as though this gap is increasing. To see if this gap can be explained by which municipality one lives in, we can look at the same plot colored by municipality as well as show a map of this AYI.
+
+```{r, echo=FALSE}
+getPalette = colorRampPalette(brewer.pal(9, "YlOrRd"))
+colorCount <- length(unique(aid$municipality))
+
+income_dev_plot <- ggplot(data = aid,
+                          aes(x = year, y = avg_income, color=municipality))
+income_dev_plot <- income_dev_plot + geom_jitter(alpha=1/2.0, size=3, width = 3)
+income_dev_plot <- income_dev_plot + theme_tufte(ticks=FALSE) + geom_smooth()
+
+
+#mapplot_v1 <- ggplot(fadm4, aes(x = long, y = lat, group=group))
+mapplot_aid <- ggplot(fadm1, aes(x = long, y = lat))
+mapplot_aid <- mapplot_aid + geom_polygon(data = fadm1,
+                                          aes(x = long,
+                                              y = lat,
+                                              fill = median_aid,
+                                              group=group),
+                                          alpha = 0.8,
+                                          colour=NA)
+mapplot_aid <- mapplot_aid + scale_color_brewer(palette="Dark2")
+mapplot_aid <- mapplot_aid + coord_cartesian(xlim=c(12.2, 12.67),
+                                             ylim=c(55.57, 55.77)) 
+mapplot_aid <- mapplot_aid + theme_tufte(ticks = FALSE)
+mapplot_aid <- mapplot_aid + coord_map()
+mapplot_aid <- mapplot_aid + scale_fill_continuous(low="blue",
+                                                   high="hotpink") 
+mapplot_aid <- mapplot_aid + geom_text(data=cnames,
+                                       aes(long, lat, label = municipality),
+                                       size=4)
+
+grid.arrange(income_dev_plot, mapplot_aid, ncol=2)
+
+```
+
+Sadly, I couldn't get all the municipalities on the map, but from the colored AYI development plot on the left, it should be clear that there is a distinct difference between AYI for people living in different municipalities. Even two bordering municipalities like Ishøj and Valenbæk have an enormous gap of about 80.000 kr. 
+
+Now, I've gone some of the questions about the data that I found most intruiging. But maybe by creating a scattermatrix, we can see some correlations that I haven't thought of.
+
+```{r, echo=FALSE}
+ggpairs(joined_apr_aid[, c(3,4,5)]) + theme_tufte(ticks = FALSE)
+```
+
+Looking at this scattermatrix, we can see that there is a correlation between median sales price and average income. This is not surprising as both the average income figure and the sales price figure showed an increase. According to the scattermatrix, there's a correlation of 0.663 which is quite high. This is not the same as causation, the average income is most likely correlated with the sales price, but sales price of appartments is not the cause of increasing income. To see the correlation figure a bit better we can look plot it.
+
+```{r, echo=FALSE}
+municipality_income <- municipality_values$
+  municipality[order(municipality_values$
+                       median_municipality_income)]
+
+municipality_values$municipality <- factor(municipality_values$municipality,
+                                           levels = municipality_income)
+# notice the changed order of factor levels
+
+municipality_avg_income <- unique(joined_apr_aid$municipality[order(joined_apr_aid$avg_income)])
+joined_apr_aid$municipality <- factor(joined_apr_aid$municipality,
+                                      levels=municipality_avg_income)
+corr_plot <- ggplot(data=joined_apr_aid, aes(x=avg_income,
+                                             y=median_sales_price,
+                                             color=municipality))
+corr_plot <- corr_plot + geom_point() 
+corr_plot <- corr_plot + coord_cartesian(ylim=c(0, 0.35e7))
+corr_plot <- corr_plot + geom_smooth(method = "lm", alpha=1/10)
+corr_plot <- corr_plot + theme_tufte(ticks = FALSE)
+corr_plot
+```
+
+As with the income gap, this figure shows that there is a difference between income and sales price correlation.
+
+One more thing I wanted to look at is how the median sales price and income by municipality looks when plotted on horizontal bar charts in an ordered fashion. 
+
+```{r, echo=FALSE}
+total_barplot <- ggplot(municipality_values,
+                        aes(x=municipality,
+                            y=median_municipality_income,
+                            fill=median_municipality_income))
+total_barplot <- total_barplot + geom_bar(stat='identity')
+total_barplot <- total_barplot + coord_flip()
+total_barplot <- total_barplot + theme_tufte(ticks = FALSE)
+total_barplot <- total_barplot + scale_fill_continuous(low="blue",
+                                                       high="hotpink")
+total_barplot
+```
+
+Looking at how this has developed over the years we can facet it by years. I've chosen to group the years.
+
+```{r, echo=FALSE}
+yearly_barplot <- ggplot(joined_apr_aid,
+                         aes(x=municipality, y=avg_income))
+yearly_barplot <- yearly_barplot + geom_bar(stat='identity')
+yearly_barplot <- yearly_barplot + facet_wrap(~year_bucket)
+yearly_barplot <- yearly_barplot + coord_flip()
+yearly_barplot + theme_tufte(ticks = FALSE)
+```
+
+What is interesting about this development is the effect of the economic crisis on average income in the years 2000-2006 and 2006-2010. We see that all the municipalities have a lower average income, but it looks as though the average income decreases more in the top 3 municipalities, resulting in an almost uniform distribution in the 2006-2010 period.
+
+Now we can look at the same figures for sales price.
+
+```{r, echo=FALSE}
+municipality_sp <- municipality_values$
+  municipality[order(municipality_values$
+                       median_municipality_sales_price)]
+municipality_values$municipality <- factor(municipality_values$municipality,
+                                           levels=municipality_sp)
+
+sp_barplot <- ggplot(municipality_values,
+                     aes(x=municipality,
+                         y=median_municipality_sales_price,
+                         fill=median_municipality_sales_price))
+sp_barplot <- sp_barplot + geom_bar(stat='identity')
+sp_barplot <- sp_barplot + coord_flip()
+sp_barplot <- sp_barplot + theme_tufte(ticks = FALSE)
+sp_barplot+ scale_fill_continuous(low="blue", high="hotpink")
+```
+
+This is similar to the map we plotted earlier, and shows that Karlslunde is in fact the most expensive municipality in the Copenhagen area. Facetted by year this gives.
+
+```{r, echo=FALSE}
+municipality_median_sp <- unique(
+  joined_apr_aid$municipality[order(joined_apr_aid$median_sales_price)])
+
+joined_apr_aid$municipality <- factor(joined_apr_aid$municipality,
+                                      levels=municipality_median_sp)
+
+yearly_sp_barplot <- ggplot(joined_apr_aid, aes(x=municipality,
+                                                y=median_sales_price))
+yearly_sp_barplot <- yearly_sp_barplot + geom_bar(stat='identity')
+yearly_sp_barplot <- yearly_sp_barplot + facet_wrap(~year_bucket)
+yearly_sp_barplot <- yearly_sp_barplot + coord_flip()
+yearly_sp_barplot + theme_tufte(ticks = FALSE)
+  
+```
+
+## Final Plots and Summary
+
+These final plots were chosen because I found them the most informative and they were important in my understanding of a market as complex as the real estate market.
+
+### Plot One
+```{r, echo=FALSE}
+price_dev_plot <- ggplot(data = subset(apr, sales_price < 1e7),
+                         aes(x = date, y = sales_price))
+price_dev_plot <- price_dev_plot + geom_point(alpha=1/10)
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=median_sp),
+                                             size=2.5,
+                                             color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=q1_sp),
+                                             size=1.5,
+                                             linetype=2,
+                                             color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + geom_line(data=head(apr_year,
+                                                       length(apr_year$year)-1),
+                                             aes(x=year, y=q3_sp),
+                                             size=1.5,
+                                             linetype=2,
+                                             color=I("#5959D9"))
+price_dev_plot <- price_dev_plot + scale_y_continuous(breaks=seq(0, 7e6, 0.5e6))
+price_dev_plot <- price_dev_plot +
+  coord_cartesian(xlim=c(tail(apr$date, 1),
+                         head(apr$date, 1)),
+                  ylim=c(0, quantile(apr$sales_price, 0.99))) 
+
+price_dev_plot <- price_dev_plot +
+  theme_tufte(ticks=FALSE) +
+  xlab("Date") +
+  ylab("Sales price") +
+  ggtitle("Sales price development")
+  
+PPSM_dev_plot <- ggplot(data = subset(apr, sales_price < 1e7),
+                        aes(x = date, y = price_per_square_meter))
+PPSM_dev_plot <- PPSM_dev_plot + geom_point(alpha=1/10)
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=median_ppsm),
+                                           size=2.5,
+                                           color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=q1_ppsm),
+                                           size=1.5,
+                                           linetype=2,
+                                           color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot + geom_line(data=head(apr_year,
+                                                     length(apr_year$year)-1),
+                                           aes(x=year, y=q3_ppsm),
+                                           size=1.5,
+                                           linetype=2,
+                                           color=I("#5959D9"))
+PPSM_dev_plot <- PPSM_dev_plot +
+  coord_cartesian(xlim=c(tail(apr$date, 1), 
+                         head(apr$date, 1)), 
+                  ylim=c(0, quantile(apr$price_per_square_meter, 0.99)))
+
+PPSM_dev_plot <- PPSM_dev_plot + 
+  theme_tufte(ticks=FALSE) + 
+  xlab("Date") +
+  ylab("Price per square meter") +
+  ggtitle("Price per square meter development")
+grid.arrange(price_dev_plot, PPSM_dev_plot, ncol=2)
+```
+
+### Description One
+
+This plot was the first plot of the analysis and was what spiked my interest into investigating sales price development by years and by municipality as well as later looking into average income by the same factors.
+The plot clearly shows a growing sales price, and price per square meter but most important also shows the large effect of the economic crisis on appartment prices. I found it very interesting that the appartment prices seemed to explode from 1992 - 2006. A period of 14 years where the appartment prices grew from an average price per square meter of 6.000 kr to 30.000 kr, i.e. almost 100% per year of the initial 1992 price per square meter. I had some talks with people older and wiser than me, who enlightened me about Realkreditlån. I then read a bit about its history and found that in 1989, this Realkreditlån had increased its loan out percentage of the property price, meaning that people would need less at hand to buy an appartment. This has ofcourse had a huge effect on the market as, low interest large loans would mean bigger affordable appartments for most people. This in turn would mean a bigger demand for appartments, which in turn would lead to less supply (appartments), and as of now, we are in the situation of the Supply and Demand curve where appartments are low and prices are very high. Before going deeper into my own investigation of this, I can't predict anything very well, but with everything I've learned from this analysis, the small knowledge I now have on bank loans and other low interest loans, as well as some basic economics like supply and demand, I have a strong indication that the appartment prices will drop drastically again soon.
+
+```{r}
+detach("package:plyr", unload=TRUE)
+ppsm_stats <- apr %>%
+  group_by(year) %>%
+  summarise(mean=mean(price_per_square_meter),
+            median=median(price_per_square_meter),
+            Q1=quantile(price_per_square_meter, 0.25),
+            Q3=quantile(price_per_square_meter, 0.75))
+head(ppsm_stats, 3)
+tail(ppsm_stats, 3)
+
+
+sp_stats <- apr %>%
+  group_by(year) %>%
+  summarise(mean=mean(sales_price),
+            median=median(sales_price),
+            Q1=quantile(sales_price, 0.25),
+            Q3=quantile(sales_price, 0.75))
+head(sp_stats, 3)
+tail(sp_stats, 3)
+```
+
+### Plot Two
+
+```{r, echo=FALSE}
+avg_income_dev_plot <- ggplot(data = aid, aes(x = year, y = avg_income)) +
+  geom_jitter(alpha=1/2.0, size=3, width = 3)
+avg_income_dev_plot <- avg_income_dev_plot +
+  theme_tufte(ticks=FALSE) + geom_smooth()
+
+avg_income_dev_plot + ggtitle("Average income development")
+```
+
+### Description Two
+
+Looking at approximately the same period as with appartment sales, this plot shows the average income of people in the same municipalities. I chose this plot as one of my finals, as this led to to the finding that the average appartment price grew by a rate of 1100% of the average income, which really spiked my curiousity. By no means does my research into the appartment market in Copenhagen end here, and this plot together with the first have given me the idea that there might be a new appartment price drop coming soon.
+
+```{r}
+aid_stats <- aid %>%
+  group_by(year) %>%
+  summarise(mean=mean(avg_income),
+            median=median(avg_income),
+            Q1=quantile(avg_income, 0.25),
+            Q3=quantile(avg_income, 0.75))
+head(aid_stats, 3)
+tail(aid_stats, 3)
+```
+
+### Plot Three
+
+```{r, echo=FALSE}
+adm3 <- getData('GADM', country='DK', level=2)
+#adm3 <- subset(adm3, NAME_2 %in% unique(apr$municipality))
+adm3 <- subset(adm3, NAME_1 == "Hovedstaden" )
+adm3 <- subset(adm3, NAME_2 != "Bornholm")
+adm3 <- subset(adm3, NAME_2 %in% unique(apr$municipality))
+
+library(plyr)
+fadm3 = fortify(adm3, region="NAME_2")
+colnames(fadm3) <- c("long", "lat", "order",
+                     "hole", "piece", "municipality",
+                     "group")
+fadm4 <- left_join(fadm3, apr_municipality)
+fadm4$breaks <- cut(fadm4$median_sales_price, 10)
+
+mapplot_v1 <- ggplot(fadm4, aes(x = long, y = lat))
+mapplot_v1 <- mapplot_v1 + geom_polygon(data = fadm4, 
+                                        aes(x = long,
+                                            y = lat, 
+                                            fill = median_sales_price, 
+                                            group=group), 
+                                        color=NA,
+                                        alpha = 0.8)
+mapplot_v1 <- mapplot_v1 + coord_cartesian(xlim=c(12.2, 12.67), 
+                                           ylim=c(55.57, 55.77)) 
+mapplot_v1 <- mapplot_v1 + theme_tufte(ticks = FALSE) + facet_wrap(~year)
+mapplot_v1 <- mapplot_v1 + coord_map() + scale_fill_continuous(low="blue",
+                                                               high="hotpink")
+mapplot_v1 <- mapplot_v1 + geom_text(data=cnames,
+                                     aes(long, lat, label = municipality),
+                                     size=1)
+mapplot_v1 + ggtitle("Sales price development per municipality per year")
+```
+
+### Description Three
+This plot was chosen to give a better overview over how and where the prices grow. It clearly shows the same tendency as the first of my final plots, which is an increase in median sales price. However, one thing which is quite hard to see, but can be seen on this plot is the movement of expensive municipalities. In the years from 1992 - 1999, the increase in median sales price per municipality seems to be quite uniform. After 2000 and until 2006 København and Frederiksberg seem to grow quite a lot faster than the other municipalities. After the economic crisis Copenhagen, Frederiksberg, Herlev and Vallensbæk seem to grow equally fast. According to the previous barplot, Vallensbæk and Herlev are actually quite below the values of Copenhagen and Frederiksberg.
+This map plot was the best I could do, and therefore it was important for me to have as a part of the final plots. I'm not very satisfied with it, as my initial idea of this analysis was to get a better indication of smaller sub municipalities like Valby, Vanløse, etc. which in the map data are grouped under København.
+
+
+## Reflection
+
+There were a lot of interesting results for me going through this analysis, like the very visible effect of the economic crisis on both average income but most visibly on the sales price of appartments. I was shocked to see that the growths in average income and appartment sales price didn't match, but I learned a whole lot about how low interest loans, especially Realkreditlån, have had a very large effect on the increase in appartment prices. It was quite interesting to see how the appartment prices had exploded again after 2010, while the average income had kept the same low increase introduced at the beginning of the economic crisis. However, I was quite sad to find out that the maps that I could find from GADM, and around the internet didn't have shapes for postal districts in central Copenhagen, since I know for a fact that there is a lot of variation in the Copenhagen areas. Furthermore I found that some of the postal districts, which I have included in my appartment sales price analysis actually turned out to be quite far from central Copenhagen, even though they had a postal code matching central Copenhagen. Furthermore, because the municipality data for average income and sales price didn't match up, some of the results might be a bit different if other data was available. I initially also had planned to create a heat map of the sales, but since the BBR data, which is the one I got from boliga.dk, doesn't contain latitudes and longitudes, I couldn't. I tried using the google API to convert addresses to latitudes and longitudes, but I could only do 2500 conversions a day, which was far too little when my dataset consisted of 70.000 sales. I looked at commercial options, but I didn't feel like paying 200$ for a conversion of latitudes and longitudes.

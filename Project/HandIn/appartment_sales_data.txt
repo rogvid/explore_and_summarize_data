@@ -1,0 +1,16 @@
+The appartment sales dataset contains data from www.boliga.dk of appartment sales in the postal districts from 1000 to 2730 in and around central Copenhagen. Each row in the dataset corresponds to a sale, and each column a variable. The dataset contains the following variables:
+city                           -     The cityname where the sale took place
+sales_price                    -     The actual sales price
+price_percentage_difference    -     The difference between initial sales price and actual sales price
+municipality                   -     The municipality where the sales took place
+size_square_meters             -     Size of the appartment in square meters
+price_per_square_meter         -     Price of the sale per square meter
+postal_code                    -     Postal code of the appartment
+sales_type                     -     Type of sale, e.g. regular, family, etc.
+nRooms                         -     Number of rooms of the appartment
+housing_built                  -     Year the property was built
+date                           -     Date of the sale
+
+date is ofcourse a date, and the following are factor variables:
+city, municipality, postal_code, sales_type
+
